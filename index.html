@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kelas Terkutuk - 3D Horror Math Escape</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #050505;
+            user-select: none;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 8px;
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 50%;
+            pointer-events: none;
+            box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+            z-index: 10;
+        }
+        .vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            box-shadow: 0 0 100px rgba(0, 0, 0, 0.8) inset;
+            pointer-events: none;
+            z-index: 5;
+        }
+        /* Shake effect untuk Jumpscare */
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-2px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .jumpscare-shake {
+            animation: shake 0.15s infinite;
+        }
+        /* Mobile Touch Controls Overlay */
+        .touch-control {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen touch-control overflow-hidden">
+
+    <!-- Canvas Three.js -->
+    <div id="canvas-container" class="w-full h-full"></div>
+
+    <!-- UI Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- UI Overlay / Vignette -->
+    <div class="vignette"></div>
+
+    <!-- Instructions Overlay -->
+    <div id="instructions" class="absolute inset-0 flex flex-col items-center justify-center bg-black/85 text-white z-20 p-6 text-center cursor-pointer">
+        <h1 class="text-3xl md:text-5xl font-bold mb-4 text-red-600 tracking-wider">KELAS TERKUTUK</h1>
+        <p class="text-sm md:text-xl mb-6 max-w-xl text-gray-300">
+            Kamu terjebak di sekolah berhantu. Selesaikan <b>10 Altar Ujian Matematika</b> untuk melepaskan segel pintu gerbang! Hati-hati, jika salah <b>3 kali</b>, <b>Hantu Guru akan langsung mendatangi & menerkammu!</b>
+        </p>
+        <div class="bg-gray-800/80 p-4 rounded-xl mb-6 border border-gray-700 text-left text-xs md:text-base space-y-1 max-w-md">
+            <p>🕹️ <b>Kontrol PC:</b> WASD, Mouse, Shift (Lari), E (Interaksi)</p>
+            <p>📱 <b>Kontrol Mobile:</b> Virtual Joystick (Kiri), Geser Layar Kanan (Kamera), Tombol Lari & Interaksi</p>
+        </div>
+        <button class="px-8 py-3 bg-red-700 hover:bg-red-600 text-white font-bold rounded-lg text-lg transition duration-200 shadow-lg shadow-red-900/50">
+            SENTUH / KLIK UNTUK MEMULAI
+        </button>
+    </div>
+
+    <!-- HUD Status -->
+    <div id="hud" class="absolute top-3 left-3 z-10 bg-gray-900/80 border border-gray-700 p-3 rounded-xl text-white backdrop-blur-sm hidden min-w-[180px] md:min-w-[220px]">
+        <div class="flex items-center justify-between mb-2 gap-2">
+            <div>
+                <div class="text-[10px] md:text-xs text-gray-400 uppercase tracking-widest font-semibold mb-0.5">Misi Keluar</div>
+                <div class="text-base md:text-lg font-bold flex items-center gap-1.5">
+                    <span>Altar:</span>
+                    <span id="altar-count" class="text-yellow-400 text-lg md:text-xl font-mono">0 / 10</span>
+                </div>
+                <div class="text-xs font-bold flex items-center gap-1 mt-0.5">
+                    <span class="text-gray-400">Salah:</span>
+                    <span id="strike-count" class="text-red-500 font-mono text-xs md:text-sm">0 / 3</span>
+                </div>
+            </div>
+            <!-- Mini Map Canvas -->
+            <canvas id="minimap" width="60" height="60" class="border border-gray-600 rounded-lg bg-gray-950 w-14 h-14 md:w-16 md:h-16"></canvas>
+        </div>
+        <div class="w-full bg-gray-700 h-1.5 md:h-2 rounded-full overflow-hidden">
+            <div id="progress-bar" class="bg-yellow-500 h-full w-0 transition-all duration-300"></div>
+        </div>
+        <div id="stamina-container" class="mt-2">
+            <div class="text-[10px] md:text-xs text-gray-400 mb-0.5 flex justify-between">
+                <span>Stamina</span>
+                <span id="stamina-val">100%</span>
+            </div>
+            <div class="w-full bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                <div id="stamina-bar" class="bg-green-500 h-full w-full"></div>
+            </div>
+        </div>
+        <div id="warning-text" class="text-[10px] md:text-xs text-red-500 font-bold mt-1.5 hidden animate-pulse tracking-wide">
+            ⚠️ HANTU MENGEJAR!
+        </div>
+    </div>
+
+    <!-- On-Screen Mobile Touch Controls Overlay -->
+    <div id="mobile-controls" class="absolute inset-0 z-10 pointer-events-none hidden touch-control">
+        <!-- Touch Look Zone (Right Screen Half) -->
+        <div id="touch-look-zone" class="absolute top-0 right-0 w-1/2 h-full pointer-events-auto"></div>
+
+        <!-- Virtual Joystick Area (Bottom Left) -->
+        <div id="joystick-zone" class="absolute bottom-6 left-6 w-32 h-32 bg-white/10 border-2 border-white/20 rounded-full pointer-events-auto flex items-center justify-center backdrop-blur-xs">
+            <div id="joystick-knob" class="w-12 h-12 bg-red-600/70 border border-white/40 rounded-full shadow-lg transform translate-x-0 translate-y-0 transition-transform duration-75"></div>
+        </div>
+
+        <!-- Touch Buttons (Bottom Right) -->
+        <div class="absolute bottom-6 right-6 flex flex-col gap-3 pointer-events-auto items-end">
+            <button id="mobile-sprint-btn" class="w-14 h-14 rounded-full bg-gray-800/80 border-2 border-green-500 text-white font-bold text-xs active:bg-green-600 backdrop-blur-md shadow-lg flex items-center justify-center select-none">
+                LARI
+            </button>
+            <button id="mobile-action-btn" class="w-16 h-16 rounded-full bg-yellow-600/90 border-2 border-yellow-300 text-black font-extrabold text-sm active:bg-yellow-500 backdrop-blur-md shadow-xl flex items-center justify-center select-none animate-pulse">
+                AKSI
+            </button>
+        </div>
+    </div>
+
+    <!-- Interaction Prompt -->
+    <div id="interact-prompt" class="absolute bottom-24 md:bottom-16 left-1/2 transform -translate-x-1/2 z-10 bg-black/80 border border-yellow-500/50 px-4 py-2 rounded-full text-white text-xs md:text-sm font-semibold tracking-wide hidden animate-pulse text-center">
+        Tekan <span class="bg-yellow-500 text-black px-2 py-0.5 rounded font-bold mx-1">E</span> / Sentuh <span class="bg-yellow-500 text-black px-2 py-0.5 rounded font-bold mx-1">AKSI</span>
+    </div>
+
+    <!-- Modal Teka-Teki / Soal Matematika -->
+    <div id="quiz-modal" class="absolute inset-0 z-30 bg-black/85 backdrop-blur-md flex items-center justify-center hidden p-4">
+        <div class="bg-gray-900 border-2 border-red-800 p-5 md:p-8 rounded-2xl max-w-md w-full shadow-2xl text-white relative max-h-[90vh] overflow-y-auto">
+            <div class="text-xs text-red-500 font-bold uppercase tracking-widest mb-1" id="quiz-header">Altar Ujian Matematika #1</div>
+            <h2 id="quiz-question" class="text-lg md:text-2xl font-bold mb-4 text-yellow-300 leading-relaxed">
+                Soal Matematika...
+            </h2>
+            <div id="quiz-options" class="grid grid-cols-1 gap-2.5 mb-4">
+                <!-- Opsi jawaban -->
+            </div>
+            <div id="quiz-feedback" class="text-center font-bold h-6 mb-2 text-sm"></div>
+            <button id="close-quiz-btn" class="w-full py-2.5 bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-300 rounded-xl text-xs md:text-sm transition font-semibold">
+                Tutup / Kabur Dari Altar
+            </button>
+        </div>
+    </div>
+
+    <!-- Fullscreen Jumpscare Screen -->
+    <div id="jumpscare-screen" class="absolute inset-0 z-50 bg-red-950 flex flex-col items-center justify-center hidden jumpscare-shake select-none overflow-hidden">
+        <!-- SVG Muka Hantu Horor -->
+        <div class="w-80 h-80 relative flex items-center justify-center">
+            <svg viewBox="0 0 200 200" class="w-full h-full filter drop-shadow-[0_0_25px_rgba(255,0,0,0.9)] animate-ping">
+                <circle cx="100" cy="100" r="90" fill="#111" stroke="#ff0000" stroke-width="4"/>
+                <ellipse cx="65" cy="75" rx="20" ry="30" fill="#fff"/>
+                <ellipse cx="135" cy="75" rx="20" ry="30" fill="#fff"/>
+                <circle cx="65" cy="80" r="8" fill="#ff0000"/>
+                <circle cx="135" cy="80" r="8" fill="#ff0000"/>
+                <polygon points="100,90 90,120 110,120" fill="#222"/>
+                <path d="M 50 140 Q 100 200 150 140 Q 100 120 50 140 Z" fill="#ff0000" stroke="#000" stroke-width="3"/>
+                <path d="M 60 145 L 65 160 M 80 148 L 85 168 M 100 150 L 100 170 M 120 148 L 115 168 M 140 145 L 135 160" stroke="#fff" stroke-width="3"/>
+            </svg>
+        </div>
+        <h1 class="text-6xl md:text-8xl font-black text-red-600 mt-4 tracking-tighter uppercase drop-shadow-[0_0_15px_rgba(255,0,0,1)]">
+            Mati!
+        </h1>
+    </div>
+
+    <!-- Screen Game Over / Menang -->
+    <div id="end-screen" class="absolute inset-0 z-40 bg-black/95 flex flex-col items-center justify-center text-white hidden p-6 text-center">
+        <h1 id="end-title" class="text-4xl md:text-5xl font-extrabold mb-4 text-red-600">KAMU TERTANGKAP!</h1>
+        <p id="end-subtitle" class="text-sm md:text-lg text-gray-300 mb-8 max-w-md">
+            Hantu Guru Matematika berhasil melemparmu ke dalam kegelapan abadi...
+        </p>
+        <button onclick="window.location.reload()" class="px-8 py-3 bg-red-700 hover:bg-red-600 font-bold rounded-lg text-lg transition shadow-lg shadow-red-900/50">
+            Coba Lagi
+        </button>
+    </div>
+
+    <script>
+        // --- KONFIGURASI GAME & STATE ---
+        let scene, camera, renderer;
+        let controlsEnabled = false;
+        let isMobile = false;
+        
+        // Pergerakan pemain
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, isSprinting = false;
+        let joystickVector = { x: 0, y: 0 };
+        let touchLookId = null, touchLookLastPos = { x: 0, y: 0 };
+
+        let prevTime = performance.now();
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        const playerHeight = 1.6;
+        let stamina = 100;
+
+        // Kontrol Rotasi Mouse & Touch
+        let pitchObject = new THREE.Object3D();
+        let yawObject = new THREE.Object3D();
+        let moveSensitivity = 0.002;
+        let touchSensitivity = 0.004;
+
+        // Elemen Lingkungan & Objek
+        const altars = [];
+        let completedAltars = 0;
+        const totalAltars = 10;
+        let wrongAnswersCount = 0;
+        const maxWrongAnswers = 3;
+        let activeAltarIndex = null;
+        let ghostEnemy;
+        let exitDoor;
+        let isEscapeOpen = false;
+
+        // Sound Synthesis (Web Audio API)
+        let audioCtx;
+
+        // Daftar 10 Soal Matematika
+        const quizList = [
+            { question: "1. Berapakah hasil dari 14 × 7 + 18?", options: ["116", "114", "108", "122"], correct: 0 },
+            { question: "2. Jika 3x + 15 = 45, berapakah nilai x?", options: ["8", "10", "12", "15"], correct: 1 },
+            { question: "3. Berapakah akar pangkat dua dari 289?", options: ["13", "15", "17", "19"], correct: 2 },
+            { question: "4. Hasil dari (45 ÷ 5) × 12 - 20 adalah...", options: ["88", "108", "96", "84"], correct: 0 },
+            { question: "5. Panjang sisi miring segitiga siku-siku dengan alas 6cm & tinggi 8cm adalah...", options: ["9 cm", "10 cm", "12 cm", "14 cm"], correct: 1 },
+            { question: "6. Berapakah 25% dari 480?", options: ["120", "100", "140", "110"], correct: 0 },
+            { question: "7. Berapakah nilai dari 2⁴ + 3³?", options: ["41", "43", "35", "49"], correct: 1 },
+            { question: "8. Jika sebuah persegi memiliki keliling 64 cm, berapa luasnya?", options: ["256 cm²", "144 cm²", "196 cm²", "225 cm²"], correct: 0 },
+            { question: "9. Hasil dari -15 + (-8) - (-12) adalah...", options: ["-11", "-35", "-19", "5"], correct: 0 },
+            { question: "10. Berapakah nilai dari FPB 36 dan 48?", options: ["6", "12", "18", "24"], correct: 1 }
+        ];
+
+        // Init Game saat Window Loaded
+        window.onload = function() {
+            detectDevice();
+            initScene();
+            setupLights();
+            buildSchoolMap();
+            spawnAltars();
+            spawnGhost();
+            setupControls();
+            setupTouchControls();
+            animate();
+        };
+
+        function detectDevice() {
+            isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+        }
+
+        function playScreamSound() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 1.2);
+
+                gain.gain.setValueAtTime(1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1.2);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 1.2);
+            } catch (e) {
+                console.log(e);
+            }
+        }
+
+        // --- 1. INISIALISASI SCENE & CAMERA ---
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0b10);
+            scene.fog = new THREE.FogExp2(0x0a0b10, 0.045);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+
+            pitchObject.add(camera);
+            yawObject.position.set(0, playerHeight, 18);
+            yawObject.add(pitchObject);
+            scene.add(yawObject);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        // --- 2. ENHANCED LIGHTING ---
+        function setupLights() {
+            const ambientLight = new THREE.AmbientLight(0x454c60, 0.85);
+            scene.add(ambientLight);
+
+            // Senter Pemain
+            const flashlight = new THREE.SpotLight(0xffffff, 3.0, 22, Math.PI / 5, 0.35, 1);
+            flashlight.position.set(0, 0, 0);
+            flashlight.target.position.set(0, 0, -1);
+            flashlight.castShadow = true;
+            camera.add(flashlight);
+            camera.add(flashlight.target);
+
+            // Penerangan Titik Lampu Koridor
+            const lightPositions = [
+                [0, 3.8, 0],
+                [-14, 3.8, -14], [14, 3.8, -14],
+                [-14, 3.8, 14], [14, 3.8, 14],
+                [0, 3.8, -14], [0, 3.8, 14],
+                [-14, 3.8, 0], [14, 3.8, 0]
+            ];
+
+            lightPositions.forEach(pos => {
+                const pl = new THREE.PointLight(0xffb05c, 1.3, 14);
+                pl.position.set(pos[0], pos[1], pos[2]);
+                pl.castShadow = true;
+                scene.add(pl);
+
+                const bulbGeo = new THREE.SphereGeometry(0.18, 8, 8);
+                const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe0b2 });
+                const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+                bulb.position.set(pos[0], pos[1], pos[2]);
+                scene.add(bulb);
+            });
+        }
+
+        // --- 3. MAZE / SEKOLAH TERKUTUK (40x40 Map) ---
+        function buildSchoolMap() {
+            const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x1a1d20, roughness: 0.6 });
+            const ceilingMaterial = new THREE.MeshStandardMaterial({ color: 0x101214, roughness: 0.9 });
+
+            // Lantai & Atap Besar
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(44, 44), floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(44, 44), ceilingMaterial);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 4.2;
+            scene.add(ceiling);
+
+            // Dinding Luar Batas (40x40)
+            createWall(44, 4.2, 0, 2.1, -22, 0); // Utara
+            createWall(44, 4.2, 0, 2.1, 22, 0);  // Selatan
+            createWall(44, 4.2, -22, 2.1, 0, Math.PI / 2); // Barat
+            createWall(44, 4.2, 22, 2.1, 0, Math.PI / 2);  // Timur
+
+            // Dinding Sekat / Lab & Ruang Kelas Internal
+            createWall(16, 4.2, -8, 2.1, -10, 0);
+            createWall(16, 4.2, 8, 2.1, -10, 0);
+            createWall(16, 4.2, -8, 2.1, 10, 0);
+            createWall(16, 4.2, 8, 2.1, 10, 0);
+            createWall(16, 4.2, -10, 2.1, 0, Math.PI / 2);
+            createWall(16, 4.2, 10, 2.1, 0, Math.PI / 2);
+
+            // Pintu Gerbang Utama Keluar
+            const doorGeo = new THREE.BoxGeometry(3.5, 4, 0.3);
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x7a0000, roughness: 0.3 });
+            exitDoor = new THREE.Mesh(doorGeo, doorMat);
+            exitDoor.position.set(0, 2, -21.8);
+            scene.add(exitDoor);
+
+            const lightDoor = new THREE.PointLight(0xff0000, 1.5, 6);
+            lightDoor.position.set(0, 3.5, -20.5);
+            scene.add(lightDoor);
+        }
+
+        function createWall(width, height, x, y, z, rotationY) {
+            const wallGeo = new THREE.BoxGeometry(width, height, 0.4);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x303640, roughness: 0.75 });
+            const wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x, y, z);
+            wall.rotation.y = rotationY;
+            wall.receiveShadow = true;
+            wall.castShadow = true;
+            scene.add(wall);
+        }
+
+        // --- 4. 10 ALTAR MATEMATIKA ---
+        function spawnAltars() {
+            const locations = [
+                { x: -18, z: -18 }, { x: 0, z: -18 }, { x: 18, z: -18 },
+                { x: -18, z: -5 },  { x: 18, z: -5 },
+                { x: -18, z: 5 },   { x: 18, z: 5 },
+                { x: -18, z: 18 },  { x: 0, z: 18 },  { x: 18, z: 18 }
+            ];
+
+            locations.forEach((loc, index) => {
+                const group = new THREE.Group();
+                group.position.set(loc.x, 0, loc.z);
+
+                // Meja Altar
+                const deskMat = new THREE.MeshStandardMaterial({ color: 0x422616, roughness: 0.5 });
+                const desk = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 1), deskMat);
+                desk.position.y = 0.45;
+                desk.castShadow = true;
+                group.add(desk);
+
+                // Lembaran Ujian Berkilau
+                const paperMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xffeb3b, 
+                    emissive: 0x665500,
+                    emissiveIntensity: 0.6
+                });
+                const paper = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.6), paperMat);
+                paper.position.set(0, 0.93, 0);
+                group.add(paper);
+
+                // Cahaya Altar
+                const altarLight = new THREE.PointLight(0xffaa00, 1.8, 4);
+                altarLight.position.set(0, 1.5, 0);
+                group.add(altarLight);
+
+                scene.add(group);
+
+                altars.push({
+                    mesh: group,
+                    paperMesh: paper,
+                    light: altarLight,
+                    solved: false,
+                    quiz: quizList[index],
+                    pos: loc
+                });
+            });
+        }
+
+        // --- 5. HANTU GURU AI (PATROLI & CHASE & TELEPORT) ---
+        function spawnGhost() {
+            const ghostGroup = new THREE.Group();
+
+            // Badan Jubah Hantu
+            const bodyGeo = new THREE.ConeGeometry(0.75, 2.4, 16);
+            const bodyMat = new THREE.MeshStandardMaterial({ 
+                color: 0x050505, 
+                roughness: 0.2, 
+                transparent: true, 
+                opacity: 0.9 
+            });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.2;
+            ghostGroup.add(body);
+
+            // Kepala
+            const headGeo = new THREE.SphereGeometry(0.38, 16, 16);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.9 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 2.25;
+            ghostGroup.add(head);
+
+            // Mata Merah Menyala
+            const eyeGeo = new THREE.SphereGeometry(0.07, 8, 8);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            
+            const eyeLeft = new THREE.Mesh(eyeGeo, eyeMat);
+            eyeLeft.position.set(-0.13, 2.3, -0.32);
+            ghostGroup.add(eyeLeft);
+
+            const eyeRight = new THREE.Mesh(eyeGeo, eyeMat);
+            eyeRight.position.set(0.13, 2.3, -0.32);
+            ghostGroup.add(eyeRight);
+
+            // Aura Cahaya Merah
+            const ghostLight = new THREE.PointLight(0xff0000, 2.5, 5);
+            ghostLight.position.set(0, 1.8, 0);
+            ghostGroup.add(ghostLight);
+
+            ghostGroup.position.set(-15, 0, -15);
+            scene.add(ghostGroup);
+
+            ghostEnemy = {
+                mesh: ghostGroup,
+                speed: 0.04,
+                chaseSpeed: 0.085,
+                state: 'patrol', // 'patrol' atau 'chase'
+                targetIndex: 0,
+                waypoints: [
+                    new THREE.Vector3(-18, 0, -18),
+                    new THREE.Vector3(18, 0, -18),
+                    new THREE.Vector3(18, 0, 18),
+                    new THREE.Vector3(-18, 0, 18)
+                ]
+            };
+        }
+
+        // --- 6. KONTROL USER (PC & MOBILE) ---
+        function startGameControls() {
+            controlsEnabled = true;
+            document.getElementById('instructions').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            if (isMobile) {
+                document.getElementById('mobile-controls').classList.remove('hidden');
+            } else {
+                document.body.requestPointerLock();
+            }
+        }
+
+        function setupControls() {
+            const instructions = document.getElementById('instructions');
+
+            instructions.addEventListener('click', startGameControls);
+
+            document.addEventListener('pointerlockchange', () => {
+                if (!isMobile) {
+                    if (document.pointerLockElement === document.body) {
+                        controlsEnabled = true;
+                        instructions.classList.add('hidden');
+                        document.getElementById('hud').classList.remove('hidden');
+                    } else {
+                        controlsEnabled = false;
+                        instructions.classList.remove('hidden');
+                    }
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!controlsEnabled || isMobile) return;
+
+                const movementX = e.movementX || 0;
+                const movementY = e.movementY || 0;
+
+                yawObject.rotation.y -= movementX * moveSensitivity;
+                pitchObject.rotation.x -= movementY * moveSensitivity;
+                pitchObject.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, pitchObject.rotation.x));
+            });
+
+            const onKeyDown = (e) => {
+                switch (e.code) {
+                    case 'KeyW': case 'ArrowUp': moveForward = true; break;
+                    case 'KeyS': case 'ArrowDown': moveBackward = true; break;
+                    case 'KeyA': case 'ArrowLeft': moveLeft = true; break;
+                    case 'KeyD': case 'ArrowRight': moveRight = true; break;
+                    case 'ShiftLeft': case 'ShiftRight': isSprinting = true; break;
+                    case 'KeyE': checkAltarInteraction(); break;
+                }
+            };
+
+            const onKeyUp = (e) => {
+                switch (e.code) {
+                    case 'KeyW': case 'ArrowUp': moveForward = false; break;
+                    case 'KeyS': case 'ArrowDown': moveBackward = false; break;
+                    case 'KeyA': case 'ArrowLeft': moveLeft = false; break;
+                    case 'KeyD': case 'ArrowRight': moveRight = false; break;
+                    case 'ShiftLeft': case 'ShiftRight': isSprinting = false; break;
+                }
+            };
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('click', (e) => {
+                if (controlsEnabled && !isMobile && e.target.tagName !== 'BUTTON') {
+                    checkAltarInteraction();
+                }
+            });
+
+            document.getElementById('close-quiz-btn').addEventListener('click', closeQuizModal);
+        }
+
+        // --- TOUCH VIRTUAL JOYSTICK & MOBILE CAMERA DRAG ---
+        function setupTouchControls() {
+            const joystickZone = document.getElementById('joystick-zone');
+            const joystickKnob = document.getElementById('joystick-knob');
+            const touchLookZone = document.getElementById('touch-look-zone');
+            const mobileActionBtn = document.getElementById('mobile-action-btn');
+            const mobileSprintBtn = document.getElementById('mobile-sprint-btn');
+
+            let joystickTouchId = null;
+            let joystickCenter = { x: 0, y: 0 };
+            const maxRadius = 45;
+
+            // Touch Joystick Movement
+            joystickZone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.changedTouches[0];
+                joystickTouchId = touch.identifier;
+                const rect = joystickZone.getBoundingClientRect();
+                joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                updateJoystick(touch.clientX, touch.clientY);
+            }, { passive: false });
+
+            window.addEventListener('touchmove', (e) => {
+                if (!controlsEnabled) return;
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === joystickTouchId) {
+                        updateJoystick(touch.clientX, touch.clientY);
+                    } else if (touch.identifier === touchLookId) {
+                        const dx = touch.clientX - touchLookLastPos.x;
+                        const dy = touch.clientY - touchLookLastPos.y;
+
+                        yawObject.rotation.y -= dx * touchSensitivity;
+                        pitchObject.rotation.x -= dy * touchSensitivity;
+                        pitchObject.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, pitchObject.rotation.x));
+
+                        touchLookLastPos = { x: touch.clientX, y: touch.clientY };
+                    }
+                }
+            }, { passive: false });
+
+            const resetJoystick = (e) => {
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === joystickTouchId) {
+                        joystickTouchId = null;
+                        joystickVector = { x: 0, y: 0 };
+                        joystickKnob.style.transform = `translate(0px, 0px)`;
+                    } else if (touch.identifier === touchLookId) {
+                        touchLookId = null;
+                    }
+                }
+            };
+
+            window.addEventListener('touchend', resetJoystick);
+            window.addEventListener('touchcancel', resetJoystick);
+
+            function updateJoystick(clientX, clientY) {
+                const dx = clientX - joystickCenter.x;
+                const dy = clientY - joystickCenter.y;
+                const dist = Math.hypot(dx, dy);
+                const angle = Math.atan2(dy, dx);
+                const clampedDist = Math.min(dist, maxRadius);
+
+                const knobX = Math.cos(angle) * clampedDist;
+                const knobY = Math.sin(angle) * clampedDist;
+
+                joystickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+                joystickVector = { x: knobX / maxRadius, y: knobY / maxRadius };
+            }
+
+            // Touch Drag Look Zone
+            touchLookZone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (touchLookId === null) {
+                    const touch = e.changedTouches[0];
+                    touchLookId = touch.identifier;
+                    touchLookLastPos = { x: touch.clientX, y: touch.clientY };
+                }
+            }, { passive: false });
+
+            // Action & Sprint Buttons
+            mobileActionBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                checkAltarInteraction();
+            });
+
+            mobileSprintBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isSprinting = true;
+                mobileSprintBtn.classList.add('bg-green-600');
+            }, { passive: false });
+
+            mobileSprintBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                isSprinting = false;
+                mobileSprintBtn.classList.remove('bg-green-600');
+            }, { passive: false });
+        }
+
+        // --- 7. TEKA-TEKI LOGIK & HUKUMAN JUMPSCARE ---
+        function checkAltarInteraction() {
+            if (activeAltarIndex !== null && !altars[activeAltarIndex].solved) {
+                openQuizModal(activeAltarIndex);
+            } else if (isEscapeOpen) {
+                const distToDoor = yawObject.position.distanceTo(exitDoor.position);
+                if (distToDoor < 3.5) {
+                    gameWin();
+                }
+            }
+        }
+
+        function openQuizModal(index) {
+            controlsEnabled = false;
+            if (!isMobile) document.exitPointerLock();
+
+            const altar = altars[index];
+            const quiz = altar.quiz;
+
+            document.getElementById('quiz-header').innerText = `Altar Ujian Matematika #${index + 1}`;
+            document.getElementById('quiz-question').innerText = quiz.question;
+            document.getElementById('quiz-feedback').innerText = '';
+
+            const optionsContainer = document.getElementById('quiz-options');
+            optionsContainer.innerHTML = '';
+
+            quiz.options.forEach((option, i) => {
+                const btn = document.createElement('button');
+                btn.className = "w-full text-left py-3 px-4 bg-gray-800 hover:bg-yellow-600/30 border border-gray-700 hover:border-yellow-500 rounded-xl transition duration-150 font-medium text-sm md:text-base active:bg-yellow-600/50";
+                btn.innerText = `${String.fromCharCode(65 + i)}. ${option}`;
+                btn.onclick = () => submitAnswer(index, i);
+                optionsContainer.appendChild(btn);
+            });
+
+            document.getElementById('quiz-modal').classList.remove('hidden');
+        }
+
+        function submitAnswer(altarIndex, selectedOption) {
+            const altar = altars[altarIndex];
+            const feedback = document.getElementById('quiz-feedback');
+
+            if (selectedOption === altar.quiz.correct) {
+                feedback.className = "text-center font-bold h-6 mb-2 text-green-400 animate-bounce text-sm";
+                feedback.innerText = "Jawaban Benar! Ritual Altar Selesai.";
+                altar.solved = true;
+
+                altar.paperMesh.material.color.setHex(0x00ff00);
+                altar.paperMesh.material.emissive.setHex(0x00aa00);
+                altar.light.color.setHex(0x00ff00);
+
+                completedAltars++;
+                updateHUD();
+
+                setTimeout(() => {
+                    closeQuizModal();
+                    if (completedAltars >= totalAltars) {
+                        unlockEscape();
+                    }
+                }, 1000);
+            } else {
+                wrongAnswersCount++;
+                updateHUD();
+
+                if (wrongAnswersCount >= maxWrongAnswers) {
+                    feedback.className = "text-center font-bold h-6 mb-2 text-red-600 animate-pulse text-sm";
+                    feedback.innerText = "3 KALI SALAH! HANTU DATANG!";
+
+                    // Teleport Hantu di dekat pemain & Mulai Mengejar
+                    const pPos = yawObject.position;
+                    ghostEnemy.mesh.position.set(pPos.x + (Math.random() > 0.5 ? 3 : -3), 0, pPos.z + (Math.random() > 0.5 ? 3 : -3));
+                    ghostEnemy.state = 'chase';
+
+                    setTimeout(() => {
+                        closeQuizModal();
+                        triggerJumpscare();
+                    }, 800);
+                } else {
+                    const sisa = maxWrongAnswers - wrongAnswersCount;
+                    feedback.className = "text-center font-bold h-6 mb-2 text-yellow-400 text-sm";
+                    feedback.innerText = `Jawaban Salah! Kesempatan tersisa ${sisa} kali lagi.`;
+                }
+            }
+        }
+
+        function closeQuizModal() {
+            document.getElementById('quiz-modal').classList.add('hidden');
+            controlsEnabled = true;
+            if (!isMobile) document.body.requestPointerLock();
+        }
+
+        function updateHUD() {
+            document.getElementById('altar-count').innerText = `${completedAltars} / ${totalAltars}`;
+            document.getElementById('strike-count').innerText = `${wrongAnswersCount} / ${maxWrongAnswers}`;
+            const percentage = (completedAltars / totalAltars) * 100;
+            document.getElementById('progress-bar').style.width = `${percentage}%`;
+        }
+
+        function unlockEscape() {
+            isEscapeOpen = true;
+            exitDoor.material.color.setHex(0x00ff88);
+            exitDoor.material.emissive = new THREE.Color(0x00aa44);
+            exitDoor.material.emissiveIntensity = 0.8;
+            
+            const prompt = document.getElementById('interact-prompt');
+            prompt.innerText = "Pintu Utama Terbuka! SEGERA KELUAR!";
+            prompt.classList.remove('hidden');
+        }
+
+        // --- 8. UPDATE HANTU AI & MINI-MAP ---
+        function updateGhost() {
+            if (!ghostEnemy) return;
+
+            const playerPos = yawObject.position;
+            const ghostPos = ghostEnemy.mesh.position;
+            const distToPlayer = ghostPos.distanceTo(playerPos);
+
+            // Deteksi Jarak Pandang (Deteksi Pemain)
+            if (distToPlayer < 10) {
+                ghostEnemy.state = 'chase';
+            } else if (distToPlayer > 18 && ghostEnemy.state === 'chase') {
+                ghostEnemy.state = 'patrol';
+            }
+
+            const warnText = document.getElementById('warning-text');
+
+            if (ghostEnemy.state === 'chase') {
+                warnText.classList.remove('hidden');
+                // Kejar Pemain
+                const dir = new THREE.Vector3().subVectors(playerPos, ghostPos).normalize();
+                ghostPos.add(dir.multiplyScalar(ghostEnemy.chaseSpeed));
+                ghostEnemy.mesh.lookAt(playerPos.x, ghostPos.y, playerPos.z);
+
+                if (distToPlayer < 1.3) {
+                    triggerJumpscare();
+                }
+            } else {
+                warnText.classList.add('hidden');
+                // Patroli Biasa
+                const targetPos = ghostEnemy.waypoints[ghostEnemy.targetIndex];
+                const dir = new THREE.Vector3().subVectors(targetPos, ghostPos).normalize();
+                ghostPos.add(dir.multiplyScalar(ghostEnemy.speed));
+                ghostEnemy.mesh.lookAt(targetPos.x, ghostPos.y, targetPos.z);
+
+                if (ghostPos.distanceTo(targetPos) < 0.6) {
+                    ghostEnemy.targetIndex = (ghostEnemy.targetIndex + 1) % ghostEnemy.waypoints.length;
+                }
+            }
+        }
+
+        function updateMinimap() {
+            const canvas = document.getElementById('minimap');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const mapSize = 44; // Skala Peta
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Transfomasi koordinat 3D (-22 ke 22) -> (0 ke w/h)
+            const mapX = (pos) => ((pos.x + 22) / mapSize) * w;
+            const mapY = (pos) => ((pos.z + 22) / mapSize) * h;
+
+            // Gambar Altar (Kuning / Hijau)
+            altars.forEach(a => {
+                ctx.fillStyle = a.solved ? '#00ff00' : '#ffcc00';
+                ctx.beginPath();
+                ctx.arc(mapX(a.mesh.position), mapY(a.mesh.position), 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Gambar Hantu (Merah)
+            if (ghostEnemy) {
+                ctx.fillStyle = '#ff0000';
+                ctx.beginPath();
+                ctx.arc(mapX(ghostEnemy.mesh.position), mapY(ghostEnemy.mesh.position), 3.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Gambar Pemain (Biru)
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath();
+            ctx.arc(mapX(yawObject.position), mapY(yawObject.position), 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // --- 9. ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+            prevTime = time;
+
+            if (controlsEnabled) {
+                let speed = 4.2;
+                if (isSprinting && stamina > 0) {
+                    speed = 8.0;
+                    stamina = Math.max(0, stamina - delta * 35);
+                } else {
+                    stamina = Math.min(100, stamina + delta * 18);
+                }
+                
+                document.getElementById('stamina-bar').style.width = `${stamina}%`;
+                document.getElementById('stamina-val').innerText = `${Math.round(stamina)}%`;
+
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+
+                // Hitung Arah Input Pergerakan (Keyboard ATAU Touch Joystick)
+                if (isMobile) {
+                    direction.z = -joystickVector.y;
+                    direction.x = joystickVector.x;
+                } else {
+                    direction.z = Number(moveForward) - Number(moveBackward);
+                    direction.x = Number(moveRight) - Number(moveLeft);
+                }
+                direction.normalize();
+
+                if (direction.z !== 0 || isNaN(direction.z) === false) {
+                    if (moveForward || moveBackward || joystickVector.y !== 0) velocity.z -= direction.z * speed * 10.0 * delta;
+                }
+                if (direction.x !== 0 || isNaN(direction.x) === false) {
+                    if (moveLeft || moveRight || joystickVector.x !== 0) velocity.x -= direction.x * speed * 10.0 * delta;
+                }
+
+                yawObject.translateX(-velocity.x * delta);
+                yawObject.translateZ(velocity.z * delta);
+
+                // Batas Peta (Collision Wall 40x40)
+                yawObject.position.x = Math.max(-20, Math.min(20, yawObject.position.x));
+                yawObject.position.z = Math.max(-20, Math.min(20, yawObject.position.z));
+
+                // Cek Altar Terdekat
+                let nearAltar = false;
+                activeAltarIndex = null;
+
+                altars.forEach((altar, index) => {
+                    if (!altar.solved) {
+                        const dist = yawObject.position.distanceTo(altar.mesh.position);
+                        if (dist < 2.3) {
+                            nearAltar = true;
+                            activeAltarIndex = index;
+                        }
+                    }
+                });
+
+                const prompt = document.getElementById('interact-prompt');
+                if (nearAltar && !isEscapeOpen) {
+                    prompt.classList.remove('hidden');
+                } else if (!isEscapeOpen) {
+                    prompt.classList.add('hidden');
+                }
+
+                updateMinimap();
+            }
+
+            updateGhost();
+            renderer.render(scene, camera);
+        }
+
+        // --- 10. JUMPSCARE & GAME OVER ---
+        function triggerJumpscare() {
+            controlsEnabled = false;
+            if (!isMobile) document.exitPointerLock();
+            playScreamSound();
+
+            const jumpscare = document.getElementById('jumpscare-screen');
+            jumpscare.classList.remove('hidden');
+
+            setTimeout(() => {
+                jumpscare.classList.add('hidden');
+                gameOver();
+            }, 1400);
+        }
+
+        function gameOver() {
+            document.getElementById('end-title').innerText = "KAMU TERTANGKAP!";
+            document.getElementById('end-title').className = "text-4xl md:text-5xl font-extrabold mb-4 text-red-600 animate-bounce";
+            document.getElementById('end-subtitle').innerText = "Hantu Guru Matematika berhasil menangkapmu! Teka-teki tidak terselesaikan.";
+            document.getElementById('end-screen').classList.remove('hidden');
+        }
+
+        function gameWin() {
+            controlsEnabled = false;
+            if (!isMobile) document.exitPointerLock();
+            document.getElementById('end-title').innerText = "BERHASIL KELUAR!";
+            document.getElementById('end-title').className = "text-4xl md:text-5xl font-extrabold mb-4 text-green-500 animate-pulse";
+            document.getElementById('end-subtitle').innerText = "Luar biasa! Kamu menyelesaikan 10 Altar Matematika dan berhasil kabur!";
+            document.getElementById('end-screen').classList.remove('hidden');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
